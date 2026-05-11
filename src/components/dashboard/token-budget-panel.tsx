@@ -4,74 +4,80 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Bell, BellOff, Target } from 'lucide-react';
+import { Bell, BellOff, Zap } from 'lucide-react';
 
-const STORAGE_KEY = 'cc_dashboard_budget';
+const STORAGE_KEY = 'cc_token_budget';
 
-type BudgetState = {
+type TokenBudgetState = {
   dailyLimit: number;
   alertPct: number;
   alertEnabled: boolean;
   notifiedDates: Record<string, boolean>;
 };
 
-function loadBudget(): BudgetState {
+function load(): TokenBudgetState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as BudgetState;
+      const parsed = JSON.parse(raw) as TokenBudgetState;
       return { ...parsed, alertPct: parsed.alertPct ?? 80 };
     }
   } catch {}
   return { dailyLimit: 0, alertPct: 80, alertEnabled: false, notifiedDates: {} };
 }
 
-function saveBudget(state: BudgetState) {
+function save(state: TokenBudgetState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export default function BudgetPanel({ todayCost }: { todayCost: number }) {
-  const [budget, setBudget] = useState<BudgetState | null>(null);
+function fmtTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+export default function TokenBudgetPanel({ todayTokens }: { todayTokens: number }) {
+  const [budget, setBudget] = useState<TokenBudgetState | null>(null);
   const [inputVal, setInputVal] = useState('');
   const [alertPctInput, setAlertPctInput] = useState('80');
 
   useEffect(() => {
-    const b = loadBudget();
+    const b = load();
     setBudget(b);
     setInputVal(b.dailyLimit > 0 ? String(b.dailyLimit) : '');
     setAlertPctInput(String(b.alertPct));
   }, []);
 
-  const checkAlert = useCallback((b: BudgetState, cost: number) => {
+  const checkAlert = useCallback((b: TokenBudgetState, tokens: number) => {
     if (!b.alertEnabled || b.dailyLimit <= 0) return;
     const threshold = b.dailyLimit * (b.alertPct / 100);
     const today = new Date().toISOString().slice(0, 10);
-    if (cost >= threshold && !b.notifiedDates[today]) {
+    if (tokens >= threshold && !b.notifiedDates[today]) {
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Claude Code 예산 임계치 도달', {
-          body: `오늘 비용 $${cost.toFixed(4)} → 한도의 ${b.alertPct}% ($${threshold.toFixed(2)}) 초과`,
+        new Notification('Claude Code 토큰 임계치 도달', {
+          body: `오늘 토큰 ${fmtTokens(tokens)} → 한도의 ${b.alertPct}% (${fmtTokens(threshold)}) 초과`,
           icon: '/favicon.ico',
         });
         const updated = { ...b, notifiedDates: { ...b.notifiedDates, [today]: true } };
-        saveBudget(updated);
+        save(updated);
         setBudget(updated);
       }
     }
   }, []);
 
   useEffect(() => {
-    if (budget) checkAlert(budget, todayCost);
-  }, [budget, todayCost, checkAlert]);
+    if (budget) checkAlert(budget, todayTokens);
+  }, [budget, todayTokens, checkAlert]);
 
   const handleSave = () => {
-    const limit = Math.max(0, parseFloat(inputVal) || 0);
+    const limit = Math.max(0, parseInt(inputVal, 10) || 0);
     const alertPct = Math.min(100, Math.max(1, parseInt(alertPctInput, 10) || 80));
-    const updated: BudgetState = {
+    const updated: TokenBudgetState = {
       ...(budget ?? { alertEnabled: false, notifiedDates: {} }),
       dailyLimit: limit,
       alertPct,
     };
-    saveBudget(updated);
+    save(updated);
     setBudget(updated);
     setAlertPctInput(String(alertPct));
   };
@@ -84,11 +90,11 @@ export default function BudgetPanel({ todayCost }: { todayCost: number }) {
         if (result !== 'granted') return;
       }
       const updated = { ...budget, alertEnabled: true, notifiedDates: {} };
-      saveBudget(updated);
+      save(updated);
       setBudget(updated);
     } else {
       const updated = { ...budget, alertEnabled: false };
-      saveBudget(updated);
+      save(updated);
       setBudget(updated);
     }
   };
@@ -97,31 +103,31 @@ export default function BudgetPanel({ todayCost }: { todayCost: number }) {
 
   const limit = budget.dailyLimit;
   const alertPct = budget.alertPct;
-  const usedPct = limit > 0 ? Math.min(100, (todayCost / limit) * 100) : 0;
+  const usedPct = limit > 0 ? Math.min(100, (todayTokens / limit) * 100) : 0;
   const threshold = limit * (alertPct / 100);
-  const alerting = limit > 0 && todayCost >= threshold;
-  const over = limit > 0 && todayCost >= limit;
+  const alerting = limit > 0 && todayTokens >= threshold;
+  const over = limit > 0 && todayTokens >= limit;
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
-          <Target className="h-4 w-4 text-muted-foreground" />
-          일별 예산
+          <Zap className="h-4 w-4 text-muted-foreground" />
+          일별 토큰 예산
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-muted-foreground">한도 $</span>
+          <span className="text-xs text-muted-foreground">한도</span>
           <Input
             type="number"
             min={0}
-            step={0.01}
+            step={1000}
             value={inputVal}
             onChange={e => setInputVal(e.target.value)}
             onBlur={handleSave}
-            placeholder="0.00"
-            className="h-8 text-sm w-24"
+            placeholder="예: 50000"
+            className="h-8 text-sm w-28"
           />
           <span className="text-xs text-muted-foreground">임계치</span>
           <Input
@@ -155,14 +161,14 @@ export default function BudgetPanel({ todayCost }: { todayCost: number }) {
         {limit > 0 && (
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">오늘 ${todayCost.toFixed(4)}</span>
+              <span className="text-muted-foreground">오늘 {fmtTokens(todayTokens)}</span>
               <span className={over ? 'text-destructive font-semibold' : alerting ? 'text-orange-500 font-semibold' : 'text-muted-foreground'}>
-                {over ? '한도 초과!' : alerting ? `임계치 도달 (${alertPct}%)` : `/ $${limit.toFixed(2)}`}
+                {over ? '한도 초과!' : alerting ? `임계치 도달 (${alertPct}%)` : `/ ${fmtTokens(limit)}`}
               </span>
             </div>
             <div className="w-full h-2 bg-muted rounded-full overflow-hidden relative">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${over ? 'bg-destructive' : alerting ? 'bg-orange-500' : 'bg-primary'}`}
+                className={`h-full rounded-full transition-all duration-500 ${over ? 'bg-destructive' : alerting ? 'bg-orange-500' : 'bg-yellow-500'}`}
                 style={{ width: `${usedPct}%` }}
               />
               {/* threshold marker */}

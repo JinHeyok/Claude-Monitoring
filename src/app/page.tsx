@@ -9,6 +9,7 @@ import ModelChart from '@/components/dashboard/model-chart';
 import ToolChart from '@/components/dashboard/tool-chart';
 import EventsTable from '@/components/dashboard/events-table';
 import BudgetPanel from '@/components/dashboard/budget-panel';
+import TokenBudgetPanel from '@/components/dashboard/token-budget-panel';
 import { Button } from '@/components/ui/button';
 import { Activity, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 
@@ -105,12 +106,13 @@ export default function Home() {
               totalTokens={data.totalTokens}
               totalSessions={data.totalSessions}
               activeTimeSeconds={data.activeTimeSeconds}
-              prevCost={data.prevCost}
-              prevTokens={data.prevTokens}
             />
 
-            {/* Budget panel */}
-            <BudgetPanel todayCost={data.todayCost} />
+            {/* Budget panels */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <BudgetPanel todayCost={data.todayCost} />
+              <TokenBudgetPanel todayTokens={data.todayTokens} />
+            </div>
 
             {/* Charts row 1 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
