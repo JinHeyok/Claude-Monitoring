@@ -30,8 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files — never commit secrets
+.env
+.env.*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +41,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# monitoring data (may contain personal usage info)
+/data/*.csv
+/data/*.json
+!/data/.gitkeep
+
+# Claude Code local settings (may contain API keys / personal config)
+.claude/settings.local.json
+
+# credentials & secrets
+*.key
+*.p12
+*.pfx
+serviceAccountKey*.json
+credentials*.json
+google-services.json
+GoogleService-Info.plist
+
+# OS & editor
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
