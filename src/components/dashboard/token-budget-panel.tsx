@@ -3,133 +3,132 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { Bell, BellOff, Zap } from 'lucide-react';
 
-const STORAGE_KEY = 'cc_token_budget';
+const STORAGE_KEY = 'cc_token_budget_v2';
 
-type TokenBudgetState = {
-  dailyLimit: number;
+type State = {
   alertPct: number;
   alertEnabled: boolean;
   notifiedDates: Record<string, boolean>;
 };
 
-function load(): TokenBudgetState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as TokenBudgetState;
-      return { ...parsed, alertPct: parsed.alertPct ?? 80 };
-    }
-  } catch {}
-  return { dailyLimit: 0, alertPct: 80, alertEnabled: false, notifiedDates: {} };
+type LimitsSnap = {
+  available: boolean;
+  fiveHour?: { usedPercent: number | null; resetsAt: number | null };
+};
+
+function formatResetIn(resetsAt: number | null | undefined): string {
+  if (!resetsAt) return '';
+  const diff = resetsAt - Date.now();
+  if (diff <= 0) return '곧 리셋';
+  const mins = Math.ceil(diff / 60_000);
+  if (mins < 60) return `${mins}분`;
+  const hours = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  return remMin > 0 ? `${hours}h ${remMin}m` : `${hours}h`;
 }
 
-function save(state: TokenBudgetState) {
+function load(): State {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return { ...{ alertPct: 80, alertEnabled: false, notifiedDates: {} }, ...JSON.parse(raw) as State };
+  } catch {}
+  return { alertPct: 80, alertEnabled: false, notifiedDates: {} };
+}
+
+function save(state: State) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function fmtTokens(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
-
-export default function TokenBudgetPanel({ todayTokens }: { todayTokens: number }) {
-  const [budget, setBudget] = useState<TokenBudgetState | null>(null);
-  const [inputVal, setInputVal] = useState('');
+export default function TokenBudgetPanel() {
+  const [state, setState] = useState<State | null>(null);
   const [alertPctInput, setAlertPctInput] = useState('80');
+  const [limits, setLimits] = useState<LimitsSnap | null>(null);
 
   useEffect(() => {
-    const b = load();
-    setBudget(b);
-    setInputVal(b.dailyLimit > 0 ? String(b.dailyLimit) : '');
-    setAlertPctInput(String(b.alertPct));
+    const s = load();
+    setState(s);
+    setAlertPctInput(String(s.alertPct));
   }, []);
 
-  const checkAlert = useCallback((b: TokenBudgetState, tokens: number) => {
-    if (!b.alertEnabled || b.dailyLimit <= 0) return;
-    const threshold = b.dailyLimit * (b.alertPct / 100);
+  useEffect(() => {
+    const fetchLimits = async () => {
+      try {
+        const res = await fetch('/api/usage/limits', { cache: 'no-store' });
+        setLimits((await res.json()) as LimitsSnap);
+      } catch {}
+    };
+    fetchLimits();
+    const id = setInterval(fetchLimits, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const fiveHourUsedPct = limits?.available ? (limits.fiveHour?.usedPercent ?? null) : null;
+
+  const checkAlert = useCallback((s: State, usedPct: number | null) => {
+    if (!s.alertEnabled || usedPct === null || usedPct < s.alertPct) return;
     const today = new Date().toISOString().slice(0, 10);
-    if (tokens >= threshold && !b.notifiedDates[today]) {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Claude Code 토큰 임계치 도달', {
-          body: `오늘 토큰 ${fmtTokens(tokens)} → 한도의 ${b.alertPct}% (${fmtTokens(threshold)}) 초과`,
-          icon: '/favicon.ico',
-        });
-        const updated = { ...b, notifiedDates: { ...b.notifiedDates, [today]: true } };
-        save(updated);
-        setBudget(updated);
-      }
+    if (s.notifiedDates[today]) return;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('Claude Code 5h 임계치 도달', {
+        body: `5시간 사용량 ${usedPct}% → 알림 기준 ${s.alertPct}% 초과`,
+        icon: '/favicon.ico',
+      });
+      const updated = { ...s, notifiedDates: { ...s.notifiedDates, [today]: true } };
+      save(updated);
+      setState(updated);
     }
   }, []);
 
   useEffect(() => {
-    if (budget) checkAlert(budget, todayTokens);
-  }, [budget, todayTokens, checkAlert]);
+    if (state) checkAlert(state, fiveHourUsedPct);
+  }, [state, fiveHourUsedPct, checkAlert]);
 
-  const handleSave = () => {
-    const limit = Math.max(0, parseInt(inputVal, 10) || 0);
+  const handleAlertPctBlur = () => {
+    if (!state) return;
     const alertPct = Math.min(100, Math.max(1, parseInt(alertPctInput, 10) || 80));
-    const updated: TokenBudgetState = {
-      ...(budget ?? { alertEnabled: false, notifiedDates: {} }),
-      dailyLimit: limit,
-      alertPct,
-    };
+    const updated = { ...state, alertPct };
     save(updated);
-    setBudget(updated);
+    setState(updated);
     setAlertPctInput(String(alertPct));
   };
 
   const toggleAlert = async () => {
-    if (!budget) return;
-    if (!budget.alertEnabled) {
+    if (!state) return;
+    if (!state.alertEnabled) {
       if ('Notification' in window && Notification.permission !== 'granted') {
         const result = await Notification.requestPermission();
         if (result !== 'granted') return;
       }
-      const updated = { ...budget, alertEnabled: true, notifiedDates: {} };
+      const updated = { ...state, alertEnabled: true, notifiedDates: {} };
       save(updated);
-      setBudget(updated);
+      setState(updated);
     } else {
-      const updated = { ...budget, alertEnabled: false };
+      const updated = { ...state, alertEnabled: false };
       save(updated);
-      setBudget(updated);
+      setState(updated);
     }
   };
 
-  if (!budget) return null;
+  if (!state) return null;
 
-  const limit = budget.dailyLimit;
-  const alertPct = budget.alertPct;
-  const usedPct = limit > 0 ? Math.min(100, (todayTokens / limit) * 100) : 0;
-  const threshold = limit * (alertPct / 100);
-  const alerting = limit > 0 && todayTokens >= threshold;
-  const over = limit > 0 && todayTokens >= limit;
+  const alertPct = state.alertPct;
+  const usedPct = fiveHourUsedPct ?? 0;
+  const alerting = fiveHourUsedPct !== null && fiveHourUsedPct >= alertPct;
+  const resetIn = formatResetIn(limits?.fiveHour?.resetsAt);
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Zap className="h-4 w-4 text-muted-foreground" />
-          일별 토큰 예산
+          5h 사용 알림
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-muted-foreground">한도</span>
-          <Input
-            type="number"
-            min={0}
-            step={1000}
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onBlur={handleSave}
-            placeholder="예: 50000"
-            className="h-8 text-sm w-28"
-          />
-          <span className="text-xs text-muted-foreground">임계치</span>
+          <span className="text-xs text-muted-foreground">알림 기준</span>
           <Input
             type="number"
             min={1}
@@ -137,49 +136,53 @@ export default function TokenBudgetPanel({ todayTokens }: { todayTokens: number 
             step={1}
             value={alertPctInput}
             onChange={e => setAlertPctInput(e.target.value)}
-            onBlur={handleSave}
+            onBlur={handleAlertPctBlur}
             placeholder="80"
             className="h-8 text-sm w-16"
           />
           <span className="text-xs text-muted-foreground">%</span>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleSave}>
-            저장
-          </Button>
-          <Button
-            size="sm"
-            variant={budget.alertEnabled ? 'default' : 'outline'}
-            className="h-8 text-xs gap-1.5"
+          <button
+            className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors ${
+              state.alertEnabled
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background text-muted-foreground border-border hover:bg-muted/60'
+            }`}
             onClick={toggleAlert}
           >
-            {budget.alertEnabled
+            {state.alertEnabled
               ? <><Bell className="h-3.5 w-3.5" />알림 ON</>
               : <><BellOff className="h-3.5 w-3.5" />알림 OFF</>
             }
-          </Button>
+          </button>
         </div>
 
-        {limit > 0 && (
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">오늘 {fmtTokens(todayTokens)}</span>
-              <span className={over ? 'text-destructive font-semibold' : alerting ? 'text-orange-500 font-semibold' : 'text-muted-foreground'}>
-                {over ? '한도 초과!' : alerting ? `임계치 도달 (${alertPct}%)` : `/ ${fmtTokens(limit)}`}
-              </span>
-            </div>
-            <div className="w-full h-2 bg-muted rounded-full overflow-hidden relative">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${over ? 'bg-destructive' : alerting ? 'bg-orange-500' : 'bg-yellow-500'}`}
-                style={{ width: `${usedPct}%` }}
-              />
-              {/* threshold marker */}
-              <div
-                className="absolute top-0 h-full w-0.5 bg-orange-400/70"
-                style={{ left: `${alertPct}%` }}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground text-right">{usedPct.toFixed(1)}% 사용 · 임계치 {alertPct}%</p>
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">
+              {fiveHourUsedPct !== null ? `5h ${fiveHourUsedPct}% 사용` : '데이터 없음'}
+            </span>
+            <span className={alerting ? 'text-orange-500 font-semibold' : 'text-muted-foreground'}>
+              {alerting
+                ? `임계치 도달 (${alertPct}%)`
+                : resetIn
+                  ? `리셋: ${resetIn}`
+                  : `기준 ${alertPct}%`}
+            </span>
           </div>
-        )}
+          <div className="w-full h-2 bg-muted rounded-full overflow-hidden relative">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${alerting ? 'bg-orange-500' : 'bg-yellow-500'}`}
+              style={{ width: `${Math.min(100, usedPct)}%` }}
+            />
+            <div
+              className="absolute top-0 h-full w-0.5 bg-orange-400/70"
+              style={{ left: `${alertPct}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground text-right">
+            {usedPct.toFixed(1)}% 사용 · 알림 기준 {alertPct}%
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

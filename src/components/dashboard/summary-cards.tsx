@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Zap, DollarSign, Terminal, Clock } from 'lucide-react';
+import { BarChart3, Timer, Terminal, Clock } from 'lucide-react';
 
 type Props = {
   totalCost: number;
@@ -10,11 +11,11 @@ type Props = {
   activeTimeSeconds: number;
 };
 
-function fmtTokens(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
+type LimitsSnap = {
+  available: boolean;
+  fiveHour?: { usedPercent: number | null };
+  sevenDay?: { usedPercent: number | null };
+};
 
 function fmtTime(s: number) {
   if (s >= 3600) return `${(s / 3600).toFixed(1)}h`;
@@ -22,28 +23,56 @@ function fmtTime(s: number) {
   return `${Math.round(s)}s`;
 }
 
-export default function SummaryCards({ totalCost, totalTokens, totalSessions, activeTimeSeconds }: Props) {
+export default function SummaryCards({ totalSessions, activeTimeSeconds }: Props) {
+  const [limits, setLimits] = useState<LimitsSnap | null>(null);
+
+  useEffect(() => {
+    const fetchLimits = async () => {
+      try {
+        const res = await fetch('/api/usage/limits', { cache: 'no-store' });
+        setLimits((await res.json()) as LimitsSnap);
+      } catch {}
+    };
+    fetchLimits();
+    const id = setInterval(fetchLimits, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const weeklyRemaining =
+    limits?.available && limits.sevenDay?.usedPercent != null
+      ? 100 - limits.sevenDay.usedPercent
+      : null;
+
+  const fiveHourRemaining =
+    limits?.available && limits.fiveHour?.usedPercent != null
+      ? 100 - limits.fiveHour.usedPercent
+      : null;
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">사용한 토큰량</CardTitle>
-          <Zap className="h-4 w-4 text-yellow-500" />
+          <CardTitle className="text-sm font-medium text-muted-foreground">Weekly 남은 한도</CardTitle>
+          <BarChart3 className="h-4 w-4 text-yellow-500" />
         </CardHeader>
         <CardContent>
-          <p className="text-2xl font-bold">{fmtTokens(totalTokens)}</p>
-          <p className="text-xs text-muted-foreground mt-1">tokens</p>
+          <p className="text-2xl font-bold">
+            {weeklyRemaining != null ? `${weeklyRemaining}%` : '--'}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">weekly remaining</p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">사용한 비용</CardTitle>
-          <DollarSign className="h-4 w-4 text-green-500" />
+          <CardTitle className="text-sm font-medium text-muted-foreground">5h 남은 한도</CardTitle>
+          <Timer className="h-4 w-4 text-green-500" />
         </CardHeader>
         <CardContent>
-          <p className="text-2xl font-bold">${totalCost.toFixed(4)}</p>
-          <p className="text-xs text-muted-foreground mt-1">USD</p>
+          <p className="text-2xl font-bold">
+            {fiveHourRemaining != null ? `${fiveHourRemaining}%` : '--'}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">5h remaining</p>
         </CardContent>
       </Card>
 

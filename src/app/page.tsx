@@ -10,6 +10,7 @@ import ToolChart from '@/components/dashboard/tool-chart';
 import EventsTable from '@/components/dashboard/events-table';
 import BudgetPanel from '@/components/dashboard/budget-panel';
 import TokenBudgetPanel from '@/components/dashboard/token-budget-panel';
+import UsageLimitsPanel from '@/components/dashboard/usage-limits-panel';
 import { Button } from '@/components/ui/button';
 import { Activity, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 
@@ -108,10 +109,13 @@ export default function Home() {
               activeTimeSeconds={data.activeTimeSeconds}
             />
 
+            {/* Claude official limits (from statusline cache) */}
+            <UsageLimitsPanel />
+
             {/* Budget panels */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <BudgetPanel todayCost={data.todayCost} />
-              <TokenBudgetPanel todayTokens={data.todayTokens} />
+              <BudgetPanel />
+              <TokenBudgetPanel />
             </div>
 
             {/* Charts row 1 */}
